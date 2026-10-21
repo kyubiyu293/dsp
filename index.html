@@ -1,0 +1,241 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>HPSS Drum / Guitar Separator</title>
+<style>
+:root{color-scheme:light dark;--bg:#fff;--fg:#1a1a1a;--mut:#666;--bd:#d8d8d8;--ac:#2f6fed}
+@media(prefers-color-scheme:dark){:root{--bg:#16181c;--fg:#e8e8e8;--mut:#9a9a9a;--bd:#33373d;--ac:#6b9bff}}
+body{font:16px/1.5 system-ui,sans-serif;background:var(--bg);color:var(--fg);max-width:760px;margin:0 auto;padding:24px 16px}
+h1{font-size:1.5rem;margin:0 0 4px}
+p.sub,.hint{color:var(--mut);font-size:.9rem;margin:4px 0 16px}
+.card{border:1px solid var(--bd);border-radius:10px;padding:16px;margin-bottom:16px}
+label{display:block;margin:12px 0 2px;font-size:.9rem}
+input[type=range]{width:100%}
+button,a.dl{background:var(--ac);color:#fff;border:0;border-radius:8px;padding:8px 14px;font:inherit;cursor:pointer;text-decoration:none;display:inline-block;margin-top:8px}
+button:disabled{opacity:.5;cursor:default}
+audio{width:100%;margin-top:6px}
+#status{margin-top:12px;color:var(--mut)}
+#bar{height:6px;background:var(--bd);border-radius:3px;margin-top:8px;overflow:hidden;display:none}
+#bar div{height:100%;width:0;background:var(--ac)}
+#plots{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}
+#plots canvas{width:100%;height:auto;border:1px solid var(--bd)}
+#plots span{font-size:.8rem;display:block;text-align:center}
+#results{display:none}
+</style>
+</head>
+<body>
+<h1>HPSS Drum / Guitar Separator</h1>
+<p class="sub">Runs entirely in your browser. Your audio never leaves your device. Splits sound into percussive (drums) and harmonic (guitar) parts.</p>
+
+<div class="card">
+  <input type="file" id="file" accept="audio/*">
+  <label>Harmonic margin: <b id="mhv">2.0</b> (higher = cleaner guitar, more artifacts)</label>
+  <input type="range" id="mh" min="1" max="8" step="0.5" value="2">
+  <label>Percussive margin: <b id="mpv">4.0</b> (higher = cleaner drums, more artifacts)</label>
+  <input type="range" id="mp" min="1" max="8" step="0.5" value="4">
+  <button id="go">Separate</button>
+  <div id="bar"><div></div></div>
+  <div id="status"></div>
+  <p class="hint">Only the first 2 minutes are processed, to keep your browser responsive.</p>
+</div>
+
+<div id="results">
+  <div class="card"><b>Isolated drums</b><audio id="ad" controls></audio><a class="dl" id="dd">Download drums</a></div>
+  <div class="card"><b>Isolated guitar</b><audio id="ag" controls></audio><a class="dl" id="dg">Download guitar</a></div>
+  <div class="card"><b>Spectrogram comparison</b><div id="plots"></div><button id="dp">Download plot (PNG)</button></div>
+</div>
+
+<script>
+const SR=22050,N=2048,HOP=512,BINS=N/2+1,K=31,MAXS=120,PH=256;
+const $=id=>document.getElementById(id);
+const tick=()=>new Promise(r=>setTimeout(r,0));
+$('mh').oninput=e=>$('mhv').textContent=(+e.target.value).toFixed(1);
+$('mp').oninput=e=>$('mpv').textContent=(+e.target.value).toFixed(1);
+const status=t=>$('status').textContent=t;
+const prog=f=>{$('bar').style.display='block';$('bar').firstChild.style.width=(f*100)+'%';};
+
+function makeFFT(n){
+  const L=Math.log2(n),rev=new Uint32Array(n),cs=new Float32Array(n/2),sn=new Float32Array(n/2);
+  for(let i=0;i<n;i++){let r=0;for(let b=0;b<L;b++)r|=((i>>b)&1)<<(L-1-b);rev[i]=r;}
+  for(let i=0;i<n/2;i++){cs[i]=Math.cos(2*Math.PI*i/n);sn[i]=Math.sin(2*Math.PI*i/n);}
+  return (re,im,inv)=>{
+    for(let i=0;i<n;i++){const j=rev[i];if(j>i){let t=re[i];re[i]=re[j];re[j]=t;t=im[i];im[i]=im[j];im[j]=t;}}
+    const sg=inv?1:-1;
+    for(let size=2;size<=n;size<<=1){
+      const half=size>>1,step=n/size;
+      for(let i=0;i<n;i+=size)for(let j=i,k=0;j<i+half;j++,k+=step){
+        const l=j+half,wr=cs[k],wi=sg*sn[k];
+        const tr=re[l]*wr-im[l]*wi,ti=re[l]*wi+im[l]*wr;
+        re[l]=re[j]-tr;im[l]=im[j]-ti;re[j]+=tr;im[j]+=ti;
+      }
+    }
+  };
+}
+
+// Sliding median (window K, edge-clamped) over src[0..n) into dst
+const win=new Float32Array(K);
+function median1d(src,n,dst){
+  const h=K>>1;
+  for(let j=0;j<K;j++)win[j]=src[Math.min(n-1,Math.max(0,j-h))];
+  win.sort();
+  dst[0]=win[h];
+  for(let i=1;i<n;i++){
+    const out=src[Math.max(0,i-1-h)],inn=src[Math.min(n-1,i+h)];
+    if(out!==inn){
+      let lo=0,hi=K-1;
+      while(lo<hi){const m=(lo+hi)>>1;if(win[m]<out)lo=m+1;else hi=m;}
+      let p=lo;win[p]=inn;
+      while(p>0&&win[p-1]>win[p]){const t=win[p];win[p]=win[p-1];win[p-1]=t;p--;}
+      while(p<K-1&&win[p+1]<win[p]){const t=win[p];win[p]=win[p+1];win[p+1]=t;p++;}
+    }
+    dst[i]=win[h];
+  }
+}
+
+function wavBlob(x,sr){
+  const b=new ArrayBuffer(44+x.length*2),v=new DataView(b);
+  const s=(o,t)=>{for(let i=0;i<t.length;i++)v.setUint8(o+i,t.charCodeAt(i));};
+  s(0,'RIFF');v.setUint32(4,36+x.length*2,true);s(8,'WAVEfmt ');v.setUint32(16,16,true);
+  v.setUint16(20,1,true);v.setUint16(22,1,true);v.setUint32(24,sr,true);v.setUint32(28,sr*2,true);
+  v.setUint16(32,2,true);v.setUint16(34,16,true);s(36,'data');v.setUint32(40,x.length*2,true);
+  for(let i=0;i<x.length;i++){const c=Math.max(-1,Math.min(1,x[i]));v.setInt16(44+i*2,c<0?c*32768:c*32767,true);}
+  return new Blob([b],{type:'audio/wav'});
+}
+
+function colormap(t){
+  t=Math.max(0,Math.min(1,t));
+  const r=255*Math.min(1,t*1.5),g=255*Math.max(0,Math.min(1,(t-.35)*1.8)),
+        b=255*(t<.5?t*1.6:Math.max(0,1-(t-.5)*1.6)+Math.max(0,(t-.85)*4));
+  return [r,g,Math.min(255,b)];
+}
+
+let plotCanvases=[],stem='audio';
+
+async function run(file){
+  stem=file.name.replace(/\.[^.]+$/,'');
+  const MH=+$('mh').value,MP=+$('mp').value;
+  status('Decoding audio…');prog(0);await tick();
+  const ac=new (window.AudioContext||window.webkitAudioContext)();
+  const dec=await ac.decodeAudioData(await file.arrayBuffer());ac.close();
+  const len=Math.min(Math.ceil(dec.duration*SR),MAXS*SR);
+  const off=new OfflineAudioContext(1,len,SR);
+  const bs=off.createBufferSource();bs.buffer=dec;bs.connect(off.destination);bs.start();
+  const y=(await off.startRendering()).getChannelData(0);
+
+  // STFT (center=true, reflect padding)
+  const fft=makeFFT(N),w=new Float32Array(N);
+  for(let i=0;i<N;i++)w[i]=.5-.5*Math.cos(2*Math.PI*i/N);
+  const pad=N/2,yp=new Float32Array(len+N);
+  for(let i=0;i<len;i++)yp[i+pad]=y[i];
+  for(let i=0;i<pad;i++){yp[pad-1-i]=y[Math.min(len-1,i+1)];yp[pad+len+i]=y[Math.max(0,len-2-i)];}
+  const F=1+Math.floor(len/HOP);
+  const RE=new Float32Array(F*BINS),IM=new Float32Array(F*BINS),MAG=new Float32Array(F*BINS);
+  const re=new Float32Array(N),im=new Float32Array(N);
+  let ref=1e-10;
+  for(let f=0;f<F;f++){
+    for(let i=0;i<N;i++){re[i]=(yp[f*HOP+i]||0)*w[i];im[i]=0;}
+    fft(re,im,false);
+    for(let k=0;k<BINS;k++){
+      const o=f*BINS+k;RE[o]=re[k];IM[o]=im[k];
+      const m=Math.hypot(re[k],im[k]);MAG[o]=m;if(m>ref)ref=m;
+    }
+    if(f%100===0){status('Analyzing… ');prog(.15*f/F);await tick();}
+  }
+
+  // Median filters: harmonic = across time, percussive = across frequency
+  const HM=new Float32Array(F*BINS),PM=new Float32Array(F*BINS);
+  const col=new Float32Array(F),colo=new Float32Array(F);
+  for(let k=0;k<BINS;k++){
+    for(let f=0;f<F;f++)col[f]=MAG[f*BINS+k];
+    median1d(col,F,colo);
+    for(let f=0;f<F;f++)HM[f*BINS+k]=colo[f];
+    if(k%64===0){status('Filtering harmonic content…');prog(.15+.35*k/BINS);await tick();}
+  }
+  for(let f=0;f<F;f++){
+    median1d(MAG.subarray(f*BINS,(f+1)*BINS),BINS,PM.subarray(f*BINS,(f+1)*BINS));
+    if(f%100===0){status('Filtering percussive content…');prog(.5+.3*f/F);await tick();}
+  }
+
+  // Soft masks + inverse STFT + spectrogram images
+  const outH=new Float32Array(len+N),outP=new Float32Array(len+N),ws=new Float32Array(len+N);
+  const PW=Math.min(F,600),imgs=[0,1,2].map(()=>new Float32Array(PW*PH));
+  const rowBins=BINS/PH;
+  const addImg=(img,f,mags)=>{
+    const x=Math.min(PW-1,Math.floor(f*PW/F));
+    for(let r=0;r<PH;r++){
+      let m=0;const a=Math.floor(r*rowBins),b=Math.max(a+1,Math.floor((r+1)*rowBins));
+      for(let k=a;k<b&&k<BINS;k++)if(mags[k]>m)m=mags[k];
+      const idx=(PH-1-r)*PW+x;if(m>img[idx])img[idx]=m;
+    }
+  };
+  const mh=new Float32Array(BINS),mpk=new Float32Array(BINS),mm=new Float32Array(BINS),mmp=new Float32Array(BINS);
+  const re2=new Float32Array(N),im2=new Float32Array(N);
+  for(let f=0;f<F;f++){
+    for(let k=0;k<BINS;k++){
+      const o=f*BINS+k,H=HM[o],P=PM[o];
+      const hh=H*H,pp=P*P,ph=(P*MH)**2,hp=(H*MP)**2;
+      mh[k]=hh+ph>0?hh/(hh+ph):.5;
+      mpk[k]=pp+hp>0?pp/(pp+hp):.5;
+      mm[k]=MAG[o]*mh[k];mmp[k]=MAG[o]*mpk[k];
+    }
+    addImg(imgs[0],f,MAG.subarray(f*BINS,(f+1)*BINS));addImg(imgs[1],f,mmp);addImg(imgs[2],f,mm);
+    for(const [mask,out] of [[mh,outH],[mpk,outP]]){
+      for(let k=0;k<BINS;k++){
+        const o=f*BINS+k,r=RE[o]*mask[k],i=IM[o]*mask[k];
+        re2[k]=r;im2[k]=i;
+        if(k>0&&k<N/2){re2[N-k]=r;im2[N-k]=-i;}
+      }
+      fft(re2,im2,true);
+      for(let i=0;i<N;i++)out[f*HOP+i]+=re2[i]/N*w[i];
+    }
+    for(let i=0;i<N;i++)ws[f*HOP+i]+=w[i]*w[i];
+    if(f%100===0){status('Reconstructing audio…');prog(.8+.2*f/F);await tick();}
+  }
+  const yh=new Float32Array(len),yd=new Float32Array(len);
+  for(let i=0;i<len;i++){const d=Math.max(ws[i+pad],1e-8);yh[i]=outH[i+pad]/d;yd[i]=outP[i+pad]/d;}
+
+  // Show results
+  const bd=wavBlob(yd,SR),bg=wavBlob(yh,SR),ud=URL.createObjectURL(bd),ug=URL.createObjectURL(bg);
+  $('ad').src=ud;$('ag').src=ug;
+  $('dd').href=ud;$('dd').download=stem+'_isolated_drums.wav';
+  $('dg').href=ug;$('dg').download=stem+'_isolated_guitar.wav';
+  const titles=['Original mix','Percussive (drums)','Harmonic (guitar)'];
+  $('plots').innerHTML='';plotCanvases=[];
+  imgs.forEach((img,n)=>{
+    const c=document.createElement('canvas');c.width=PW;c.height=PH;
+    const ctx=c.getContext('2d'),id=ctx.createImageData(PW,PH);
+    for(let i=0;i<PW*PH;i++){
+      const db=20*Math.log10(Math.max(img[i],1e-10)/ref),[r,g,b]=colormap((db+80)/80);
+      id.data[i*4]=r;id.data[i*4+1]=g;id.data[i*4+2]=b;id.data[i*4+3]=255;
+    }
+    ctx.putImageData(id,0,0);plotCanvases.push(c);
+    const d=document.createElement('div');d.appendChild(c);
+    const s=document.createElement('span');s.textContent=titles[n];d.appendChild(s);$('plots').appendChild(d);
+  });
+  $('results').style.display='block';
+  prog(1);status('Done. Processed '+(len/SR).toFixed(1)+' s of audio.');
+}
+
+$('dp').onclick=()=>{
+  const W=plotCanvases[0].width,H=plotCanvases[0].height,T=28,c=document.createElement('canvas');
+  c.width=W*3+20;c.height=H+T;
+  const x=c.getContext('2d');x.fillStyle='#fff';x.fillRect(0,0,c.width,c.height);
+  x.fillStyle='#000';x.font='bold 14px sans-serif';
+  const t=['Original mix','Percussive (drums)','Harmonic (guitar)'];
+  plotCanvases.forEach((p,i)=>{x.drawImage(p,i*(W+10),T);x.fillText(t[i],i*(W+10)+6,18);});
+  const a=document.createElement('a');a.href=c.toDataURL('image/png');a.download=stem+'_spectrograms.png';a.click();
+};
+
+$('go').onclick=async()=>{
+  const f=$('file').files[0];
+  if(!f){status('Choose an audio file first.');return;}
+  $('go').disabled=true;
+  try{await run(f);}
+  catch(e){console.error(e);status('Error: '+(e.message||'could not decode this file. Try WAV or MP3.'));}
+  $('go').disabled=false;
+};
+</script>
+</body>
+</html>
