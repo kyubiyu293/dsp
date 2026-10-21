@@ -1,0 +1,326 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>HPSS Drum / Guitar Separator</title>
+<style>
+:root{color-scheme:dark;--bg:#0b0d17;--card:rgba(255,255,255,.045);--bd:rgba(255,255,255,.09);--fg:#f3f4f8;--mut:#9aa0b4;--ac:#8b7bff;--g:#5eead4;--d:#ff7a59}
+*{box-sizing:border-box}
+body{margin:0;min-height:100vh;font:16px/1.55 ui-sans-serif,system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;color:var(--fg);background:radial-gradient(900px 500px at 12% -10%,rgba(139,123,255,.28),transparent 60%),radial-gradient(800px 500px at 95% 5%,rgba(94,234,212,.16),transparent 60%),radial-gradient(700px 500px at 60% 110%,rgba(255,122,89,.14),transparent 60%),var(--bg);background-attachment:fixed}
+.wrap{max-width:980px;margin:0 auto;padding:40px 20px 56px}
+header{text-align:center;margin-bottom:32px}
+.logo{display:inline-flex;align-items:center;gap:5px;height:40px;margin-bottom:14px}
+.logo i{width:6px;border-radius:3px;background:linear-gradient(var(--ac),var(--g));animation:eq 1.3s ease-in-out infinite}
+@keyframes eq{50%{transform:scaleY(.4)}}
+h1{font-size:clamp(2rem,5vw,2.9rem);margin:0;letter-spacing:-.025em;background:linear-gradient(90deg,#fff,#c7c2ff 50%,var(--g));-webkit-background-clip:text;background-clip:text;color:transparent}
+header p{color:var(--mut);margin:8px auto 0;max-width:540px}
+.card{background:var(--card);border:1px solid var(--bd);border-radius:20px;padding:24px;margin-bottom:20px;backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px);box-shadow:0 10px 40px rgba(0,0,0,.35)}
+#drop{display:flex;flex-direction:column;align-items:center;gap:6px;padding:36px 16px;border:2px dashed rgba(255,255,255,.18);border-radius:16px;cursor:pointer;text-align:center;transition:.2s}
+#drop:hover,#drop.over{border-color:var(--ac);background:rgba(139,123,255,.08)}
+#drop svg{width:42px;height:42px;stroke:var(--ac);fill:none;stroke-width:1.6;stroke-linecap:round;stroke-linejoin:round}
+#drop small{color:var(--mut)}
+#chip{display:none;margin-top:6px;padding:4px 14px;border-radius:99px;background:rgba(139,123,255,.2);font-size:.85rem}
+#file{display:none}
+.ctrls{display:grid;grid-template-columns:1fr 1fr;gap:22px;margin:24px 0 4px}
+@media(max-width:640px){.ctrls{grid-template-columns:1fr}}
+.ctrl label{display:flex;justify-content:space-between;font-weight:600;font-size:.92rem}
+.ctrl label span{color:var(--c);font-variant-numeric:tabular-nums}
+.ctrl small{color:var(--mut);display:block;margin-top:6px;font-size:.8rem}
+input[type=range]{-webkit-appearance:none;appearance:none;width:100%;height:6px;border-radius:3px;background:rgba(255,255,255,.12);margin:14px 0 0;outline:none}
+input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:20px;height:20px;border-radius:50%;background:var(--c);border:3px solid var(--bg);box-shadow:0 0 0 1px var(--c);cursor:pointer}
+input[type=range]::-moz-range-thumb{width:14px;height:14px;border-radius:50%;background:var(--c);border:3px solid var(--bg);cursor:pointer}
+#go{width:100%;margin-top:22px;padding:14px;border:0;border-radius:14px;font:inherit;font-weight:700;font-size:1.05rem;color:#0b0d17;cursor:pointer;background:linear-gradient(90deg,var(--ac),var(--g));transition:.2s;box-shadow:0 8px 28px rgba(139,123,255,.35)}
+#go:hover:not(:disabled){transform:translateY(-1px);filter:brightness(1.08)}
+#go:disabled{opacity:.55;cursor:wait}
+#bar{display:none;height:6px;border-radius:3px;background:rgba(255,255,255,.1);margin-top:16px;overflow:hidden}
+#bar div{height:100%;width:0;background:linear-gradient(90deg,var(--ac),var(--g));transition:width .25s}
+#status{margin-top:10px;color:var(--mut);font-size:.9rem;text-align:center;min-height:1.4em}
+#results{display:none}
+#results.show{display:block;animation:up .5s ease}
+@keyframes up{from{opacity:0;transform:translateY(14px)}}
+.stems{display:grid;grid-template-columns:1fr 1fr;gap:20px}
+@media(max-width:720px){.stems{grid-template-columns:1fr}}
+.stem{border-top:3px solid var(--c)}
+.card h2{margin:0 0 2px;font-size:1.15rem}
+.card h2+p{margin:0 0 14px;color:var(--mut);font-size:.85rem}
+canvas.wave{width:100%;height:80px;display:block;border-radius:10px;background:rgba(0,0,0,.28)}
+audio{width:100%;margin-top:12px;height:40px}
+a.dl,.btn{display:inline-block;margin-top:14px;padding:9px 16px;border-radius:10px;border:1px solid var(--c,var(--ac));color:var(--c,var(--ac));background:transparent;font:inherit;font-weight:600;font-size:.9rem;text-decoration:none;cursor:pointer;transition:.2s}
+a.dl:hover,.btn:hover{background:var(--c,var(--ac));color:#0b0d17}
+#plot{width:100%;height:auto;border-radius:12px;display:block}
+footer{text-align:center;color:var(--mut);font-size:.82rem;margin-top:28px}
+</style>
+</head>
+<body>
+<div class="wrap">
+<header>
+  <div class="logo"><i style="height:30%;animation-delay:-.1s"></i><i style="height:65%;animation-delay:-.5s"></i><i style="height:100%;animation-delay:-.9s"></i><i style="height:55%;animation-delay:-.3s"></i><i style="height:85%;animation-delay:-.7s"></i><i style="height:40%;animation-delay:-1.1s"></i><i style="height:70%;animation-delay:-.2s"></i></div>
+  <h1>Stem Lab</h1>
+  <p>Split a track into drums and guitar right in your browser. Private, free, and nothing is uploaded.</p>
+</header>
+<div class="card">
+  <label id="drop" for="file">
+    <svg viewBox="0 0 24 24"><path d="M12 16V4M7 9l5-5 5 5"/><path d="M4 16v3a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-3"/></svg>
+    <b>Drop an audio file here</b>
+    <small>or click to browse · MP3, WAV, FLAC, M4A</small>
+    <span id="chip"></span>
+  </label>
+  <input type="file" id="file" accept="audio/*">
+  <div class="ctrls">
+    <div class="ctrl" style="--c:#5eead4"><label>Guitar (harmonic) margin <span id="mhv">2.0</span></label><input type="range" id="mh" min="1" max="8" step="0.5" value="2"><small>Higher = cleaner guitar, more artifacts</small></div>
+    <div class="ctrl" style="--c:#ff7a59"><label>Drums (percussive) margin <span id="mpv">4.0</span></label><input type="range" id="mp" min="1" max="8" step="0.5" value="4"><small>Higher = cleaner drums, more artifacts</small></div>
+  </div>
+  <button id="go">Separate</button>
+  <div id="bar"><div></div></div>
+  <div id="status"></div>
+</div>
+<div id="results">
+  <div class="stems">
+    <div class="card stem" style="--c:#ff7a59"><h2>Isolated drums</h2><p>Percussive stem</p><canvas class="wave" id="wd"></canvas><audio id="ad" controls></audio><a class="dl" id="dd">Download WAV</a></div>
+    <div class="card stem" style="--c:#5eead4"><h2>Isolated guitar</h2><p>Harmonic stem</p><canvas class="wave" id="wg"></canvas><audio id="ag" controls></audio><a class="dl" id="dg">Download WAV</a></div>
+  </div>
+  <div class="card"><h2>Spectrogram comparison</h2><p>Shared dB scale, relative to the mix peak</p><canvas id="plot"></canvas><button class="btn" id="dp">Download plot (PNG)</button></div>
+</div>
+<footer>Runs 100% on your device · first 2 minutes of audio are processed · HPSS splits tonal vs. transient sound, not individual instruments</footer>
+</div>
+<script>
+const SR=22050,N=2048,HOP=512,BINS=N/2+1,K=31,MAXS=120,PH=256;
+const $=id=>document.getElementById(id);
+const tick=()=>new Promise(r=>setTimeout(r,0));
+$('mh').oninput=e=>$('mhv').textContent=(+e.target.value).toFixed(1);
+$('mp').oninput=e=>$('mpv').textContent=(+e.target.value).toFixed(1);
+const status=t=>$('status').textContent=t;
+const prog=f=>{$('bar').style.display='block';$('bar').firstChild.style.width=(f*100)+'%';};
+
+function makeFFT(n){
+  const L=Math.log2(n),rev=new Uint32Array(n),cs=new Float32Array(n/2),sn=new Float32Array(n/2);
+  for(let i=0;i<n;i++){let r=0;for(let b=0;b<L;b++)r|=((i>>b)&1)<<(L-1-b);rev[i]=r;}
+  for(let i=0;i<n/2;i++){cs[i]=Math.cos(2*Math.PI*i/n);sn[i]=Math.sin(2*Math.PI*i/n);}
+  return (re,im,inv)=>{
+    for(let i=0;i<n;i++){const j=rev[i];if(j>i){let t=re[i];re[i]=re[j];re[j]=t;t=im[i];im[i]=im[j];im[j]=t;}}
+    const sg=inv?1:-1;
+    for(let size=2;size<=n;size<<=1){
+      const half=size>>1,step=n/size;
+      for(let i=0;i<n;i+=size)for(let j=i,k=0;j<i+half;j++,k+=step){
+        const l=j+half,wr=cs[k],wi=sg*sn[k];
+        const tr=re[l]*wr-im[l]*wi,ti=re[l]*wi+im[l]*wr;
+        re[l]=re[j]-tr;im[l]=im[j]-ti;re[j]+=tr;im[j]+=ti;
+      }
+    }
+  };
+}
+
+// Sliding median (window K, edge-clamped) over src[0..n) into dst
+const win=new Float32Array(K);
+function median1d(src,n,dst){
+  const h=K>>1;
+  for(let j=0;j<K;j++)win[j]=src[Math.min(n-1,Math.max(0,j-h))];
+  win.sort();
+  dst[0]=win[h];
+  for(let i=1;i<n;i++){
+    const out=src[Math.max(0,i-1-h)],inn=src[Math.min(n-1,i+h)];
+    if(out!==inn){
+      let lo=0,hi=K-1;
+      while(lo<hi){const m=(lo+hi)>>1;if(win[m]<out)lo=m+1;else hi=m;}
+      let p=lo;win[p]=inn;
+      while(p>0&&win[p-1]>win[p]){const t=win[p];win[p]=win[p-1];win[p-1]=t;p--;}
+      while(p<K-1&&win[p+1]<win[p]){const t=win[p];win[p]=win[p+1];win[p+1]=t;p++;}
+    }
+    dst[i]=win[h];
+  }
+}
+
+function wavBlob(x,sr){
+  const b=new ArrayBuffer(44+x.length*2),v=new DataView(b);
+  const s=(o,t)=>{for(let i=0;i<t.length;i++)v.setUint8(o+i,t.charCodeAt(i));};
+  s(0,'RIFF');v.setUint32(4,36+x.length*2,true);s(8,'WAVEfmt ');v.setUint32(16,16,true);
+  v.setUint16(20,1,true);v.setUint16(22,1,true);v.setUint32(24,sr,true);v.setUint32(28,sr*2,true);
+  v.setUint16(32,2,true);v.setUint16(34,16,true);s(36,'data');v.setUint32(40,x.length*2,true);
+  for(let i=0;i<x.length;i++){const c=Math.max(-1,Math.min(1,x[i]));v.setInt16(44+i*2,c<0?c*32768:c*32767,true);}
+  return new Blob([b],{type:'audio/wav'});
+}
+
+function colormap(t){
+  t=Math.max(0,Math.min(1,t));
+  const r=255*Math.min(1,t*1.5),g=255*Math.max(0,Math.min(1,(t-.35)*1.8)),
+        b=255*(t<.5?t*1.6:Math.max(0,1-(t-.5)*1.6)+Math.max(0,(t-.85)*4));
+  return [r,g,Math.min(255,b)];
+}
+
+let plotCanvases=[],stem='audio';
+
+async function run(file){
+  stem=file.name.replace(/\.[^.]+$/,'');
+  const MH=+$('mh').value,MP=+$('mp').value;
+  status('Decoding audio…');prog(0);await tick();
+  const ac=new (window.AudioContext||window.webkitAudioContext)();
+  const dec=await ac.decodeAudioData(await file.arrayBuffer());ac.close();
+  const len=Math.min(Math.ceil(dec.duration*SR),MAXS*SR);
+  const off=new OfflineAudioContext(1,len,SR);
+  const bs=off.createBufferSource();bs.buffer=dec;bs.connect(off.destination);bs.start();
+  const y=(await off.startRendering()).getChannelData(0);
+
+  // STFT (center=true, reflect padding)
+  const fft=makeFFT(N),w=new Float32Array(N);
+  for(let i=0;i<N;i++)w[i]=.5-.5*Math.cos(2*Math.PI*i/N);
+  const pad=N/2,yp=new Float32Array(len+N);
+  for(let i=0;i<len;i++)yp[i+pad]=y[i];
+  for(let i=0;i<pad;i++){yp[pad-1-i]=y[Math.min(len-1,i+1)];yp[pad+len+i]=y[Math.max(0,len-2-i)];}
+  const F=1+Math.floor(len/HOP);
+  const RE=new Float32Array(F*BINS),IM=new Float32Array(F*BINS),MAG=new Float32Array(F*BINS);
+  const re=new Float32Array(N),im=new Float32Array(N);
+  let ref=1e-10;
+  for(let f=0;f<F;f++){
+    for(let i=0;i<N;i++){re[i]=(yp[f*HOP+i]||0)*w[i];im[i]=0;}
+    fft(re,im,false);
+    for(let k=0;k<BINS;k++){
+      const o=f*BINS+k;RE[o]=re[k];IM[o]=im[k];
+      const m=Math.hypot(re[k],im[k]);MAG[o]=m;if(m>ref)ref=m;
+    }
+    if(f%100===0){status('Analyzing… ');prog(.15*f/F);await tick();}
+  }
+
+  // Median filters: harmonic = across time, percussive = across frequency
+  const HM=new Float32Array(F*BINS),PM=new Float32Array(F*BINS);
+  const col=new Float32Array(F),colo=new Float32Array(F);
+  for(let k=0;k<BINS;k++){
+    for(let f=0;f<F;f++)col[f]=MAG[f*BINS+k];
+    median1d(col,F,colo);
+    for(let f=0;f<F;f++)HM[f*BINS+k]=colo[f];
+    if(k%64===0){status('Filtering harmonic content…');prog(.15+.35*k/BINS);await tick();}
+  }
+  for(let f=0;f<F;f++){
+    median1d(MAG.subarray(f*BINS,(f+1)*BINS),BINS,PM.subarray(f*BINS,(f+1)*BINS));
+    if(f%100===0){status('Filtering percussive content…');prog(.5+.3*f/F);await tick();}
+  }
+
+  // Soft masks + inverse STFT + spectrogram images
+  const outH=new Float32Array(len+N),outP=new Float32Array(len+N),ws=new Float32Array(len+N);
+  const PW=Math.min(F,600),imgs=[0,1,2].map(()=>new Float32Array(PW*PH));
+  const rowBins=BINS/PH;
+  const addImg=(img,f,mags)=>{
+    const x=Math.min(PW-1,Math.floor(f*PW/F));
+    for(let r=0;r<PH;r++){
+      let m=0;const a=Math.floor(r*rowBins),b=Math.max(a+1,Math.floor((r+1)*rowBins));
+      for(let k=a;k<b&&k<BINS;k++)if(mags[k]>m)m=mags[k];
+      const idx=(PH-1-r)*PW+x;if(m>img[idx])img[idx]=m;
+    }
+  };
+  const mh=new Float32Array(BINS),mpk=new Float32Array(BINS),mm=new Float32Array(BINS),mmp=new Float32Array(BINS);
+  const re2=new Float32Array(N),im2=new Float32Array(N);
+  for(let f=0;f<F;f++){
+    for(let k=0;k<BINS;k++){
+      const o=f*BINS+k,H=HM[o],P=PM[o];
+      const hh=H*H,pp=P*P,ph=(P*MH)**2,hp=(H*MP)**2;
+      mh[k]=hh+ph>0?hh/(hh+ph):.5;
+      mpk[k]=pp+hp>0?pp/(pp+hp):.5;
+      mm[k]=MAG[o]*mh[k];mmp[k]=MAG[o]*mpk[k];
+    }
+    addImg(imgs[0],f,MAG.subarray(f*BINS,(f+1)*BINS));addImg(imgs[1],f,mmp);addImg(imgs[2],f,mm);
+    for(const [mask,out] of [[mh,outH],[mpk,outP]]){
+      for(let k=0;k<BINS;k++){
+        const o=f*BINS+k,r=RE[o]*mask[k],i=IM[o]*mask[k];
+        re2[k]=r;im2[k]=i;
+        if(k>0&&k<N/2){re2[N-k]=r;im2[N-k]=-i;}
+      }
+      fft(re2,im2,true);
+      for(let i=0;i<N;i++)out[f*HOP+i]+=re2[i]/N*w[i];
+    }
+    for(let i=0;i<N;i++)ws[f*HOP+i]+=w[i]*w[i];
+    if(f%100===0){status('Reconstructing audio…');prog(.8+.2*f/F);await tick();}
+  }
+  const yh=new Float32Array(len),yd=new Float32Array(len);
+  for(let i=0;i<len;i++){const d=Math.max(ws[i+pad],1e-8);yh[i]=outH[i+pad]/d;yd[i]=outP[i+pad]/d;}
+
+  // Show results
+  const ud=URL.createObjectURL(wavBlob(yd,SR)),ug=URL.createObjectURL(wavBlob(yh,SR));
+  $('ad').src=ud;$('ag').src=ug;
+  $('dd').href=ud;$('dd').download=stem+'_isolated_drums.wav';
+  $('dg').href=ug;$('dg').download=stem+'_isolated_guitar.wav';
+  $('results').classList.add('show');
+  wave($('wd'),yd,'#ff7a59');wave($('wg'),yh,'#5eead4');
+  drawPlot(imgs,PW,PH,ref,len);
+  $('results').scrollIntoView({behavior:'smooth'});
+  prog(1);status('Done. Processed '+(len/SR).toFixed(1)+' s of audio.');
+}
+
+function wave(c,x,col){
+  const W=c.width=1200,H=c.height=160,g=c.getContext('2d');
+  let pk=1e-9;for(let i=0;i<x.length;i++){const a=Math.abs(x[i]);if(a>pk)pk=a;}
+  const step=x.length/W;g.fillStyle=col;
+  for(let i=0;i<W;i++){
+    let m=0;const a=Math.floor(i*step),b=Math.floor((i+1)*step);
+    for(let j=a;j<b;j++){const v=Math.abs(x[j]);if(v>m)m=v;}
+    const h=Math.max(2,m/pk*H*.9);g.fillRect(i,(H-h)/2,1,h);
+  }
+}
+
+const STOPS=[[0,0,4],[40,11,84],[101,21,110],[159,42,99],[212,72,66],[245,125,21],[250,193,39],[252,255,164]];
+function cm(t){
+  t=Math.max(0,Math.min(.9999,t))*7;const i=Math.floor(t),f=t-i,a=STOPS[i],b=STOPS[i+1];
+  return [a[0]+(b[0]-a[0])*f,a[1]+(b[1]-a[1])*f,a[2]+(b[2]-a[2])*f];
+}
+
+function drawPlot(imgs,PW,PH,ref,len){
+  const pw=560,ph=300,L=84,G=36,T=96,B=70,R=130,W=L+3*pw+2*G+R,H=T+ph+B;
+  const c=$('plot');c.width=W;c.height=H;
+  const x=c.getContext('2d');
+  x.fillStyle='#0b0d17';x.fillRect(0,0,W,H);
+  x.textAlign='center';x.fillStyle='#f3f4f8';x.font='600 28px system-ui,sans-serif';
+  x.fillText('HPSS Separation: Spectrogram Comparison',W/2,40);
+  const titles=['Original mix','Isolated drums (percussive)','Isolated guitar (harmonic)'],cols=['#c7c2ff','#ff7a59','#5eead4'];
+  const dur=len/SR,ts=[1,2,5,10,15,20,30,60].find(s=>dur/s<=8)||120,tmp=document.createElement('canvas');
+  tmp.width=PW;tmp.height=PH;
+  imgs.forEach((img,n)=>{
+    const tc=tmp.getContext('2d'),id=tc.createImageData(PW,PH);
+    for(let i=0;i<PW*PH;i++){
+      const db=20*Math.log10(Math.max(img[i],1e-10)/ref),[r,g,b]=cm((db+80)/80);
+      id.data[i*4]=r;id.data[i*4+1]=g;id.data[i*4+2]=b;id.data[i*4+3]=255;
+    }
+    tc.putImageData(id,0,0);
+    const ox=L+n*(pw+G);
+    x.imageSmoothingEnabled=true;x.drawImage(tmp,ox,T,pw,ph);
+    x.strokeStyle='rgba(255,255,255,.25)';x.lineWidth=1.5;x.strokeRect(ox,T,pw,ph);
+    x.fillStyle=cols[n];x.font='600 20px system-ui,sans-serif';x.textAlign='center';
+    x.fillText(titles[n],ox+pw/2,T-18);
+    x.fillStyle='#aab0c6';x.font='16px system-ui,sans-serif';x.strokeStyle='rgba(255,255,255,.4)';
+    for(let t=0;t<=dur;t+=ts){const px=ox+t/dur*pw;x.beginPath();x.moveTo(px,T+ph);x.lineTo(px,T+ph+6);x.stroke();x.fillText(t,px,T+ph+26);}
+    x.fillText('Time (s)',ox+pw/2,T+ph+54);
+    for(let k=0;k<=10;k+=2){
+      const py=T+ph-k*1000/(SR/2)*ph;x.beginPath();x.moveTo(ox-6,py);x.lineTo(ox,py);x.stroke();
+      if(n===0){x.textAlign='right';x.fillText(k+'k',ox-12,py+5);x.textAlign='center';}
+    }
+  });
+  x.save();x.translate(22,T+ph/2);x.rotate(-Math.PI/2);x.fillStyle='#aab0c6';x.font='16px system-ui,sans-serif';x.fillText('Frequency (Hz)',0,0);x.restore();
+  const cx=L+3*pw+2*G+34;
+  for(let i=0;i<ph;i++){const [r,g,b]=cm(1-i/ph);x.fillStyle=`rgb(${r|0},${g|0},${b|0})`;x.fillRect(cx,T+i,22,1.5);}
+  x.strokeRect(cx,T,22,ph);x.fillStyle='#aab0c6';x.textAlign='left';x.font='16px system-ui,sans-serif';
+  for(let d=0;d<=80;d+=20){const py=T+d/80*ph;x.fillText((d?'-'+d:'0')+' dB',cx+30,py+5);}
+  x.save();x.translate(cx+104,T+ph/2);x.rotate(Math.PI/2);x.textAlign='center';x.fillText('Level re: mix peak (dB)',0,0);x.restore();
+}
+
+$('dp').onclick=()=>{const a=document.createElement('a');a.href=$('plot').toDataURL('image/png');a.download=stem+'_spectrograms.png';a.click();};
+
+function setFile(f){
+  if(!f)return;
+  $('chip').style.display='inline-block';
+  $('chip').textContent=f.name+' · '+(f.size/1048576).toFixed(1)+' MB';
+}
+$('file').onchange=e=>setFile(e.target.files[0]);
+const dz=$('drop');
+['dragenter','dragover'].forEach(t=>dz.addEventListener(t,e=>{e.preventDefault();dz.classList.add('over');}));
+['dragleave','drop'].forEach(t=>dz.addEventListener(t,e=>{e.preventDefault();dz.classList.remove('over');}));
+dz.addEventListener('drop',e=>{if(e.dataTransfer.files.length){$('file').files=e.dataTransfer.files;setFile($('file').files[0]);}});
+
+$('go').onclick=async()=>{
+  const f=$('file').files[0];
+  if(!f){status('Choose an audio file first.');return;}
+  $('go').disabled=true;$('go').textContent='Separating…';
+  try{await run(f);}
+  catch(e){console.error(e);status('Error: '+(e.message||'could not decode this file. Try WAV or MP3.'));}
+  $('go').disabled=false;$('go').textContent='Separate';
+};
+</script>
+</body>
+</html>
